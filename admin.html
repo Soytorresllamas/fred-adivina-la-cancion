@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FRED · Administrar canciones 🛠️</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:radial-gradient(circle at 50% 0%, #1e293b, #0f172a);min-height:100vh;color:#e2e8f0;padding:28px 14px;display:flex;flex-direction:column;align-items:center;gap:18px;}
+  h1{font-size:22px;font-weight:800;text-align:center;}
+  h1 span{display:block;font-size:13px;font-weight:500;opacity:.6;margin-top:3px;}
+  a{color:#86efac;}
+  .card{width:100%;max-width:560px;background:#0b1220;border:1px solid #1f2937;border-radius:18px;padding:20px;}
+  .card h2{font-size:14px;text-transform:uppercase;letter-spacing:1px;color:#fbbf24;margin-bottom:14px;}
+  label{display:block;font-size:12px;color:#94a3b8;margin:12px 0 5px;}
+  input,select{width:100%;background:#020617;border:1px solid #334155;border-radius:10px;padding:11px 12px;color:#e2e8f0;font-size:15px;font-family:inherit;}
+  input:focus,select:focus{outline:none;border-color:#fbbf24;}
+  input[type=file]{padding:9px;}
+  .row{display:flex;gap:10px;}
+  .row>div{flex:1;}
+  button{border:none;border-radius:999px;padding:12px 22px;font-size:15px;font-weight:800;cursor:pointer;background:#fbbf24;color:#1a1206;transition:.15s;margin-top:16px;}
+  button:hover:not(:disabled){filter:brightness(1.08);}
+  button:disabled{opacity:.45;cursor:default;}
+  button.ghost{background:#1e293b;color:#cbd5e1;}
+  button.danger{background:#7f1d1d;color:#fecaca;font-size:13px;padding:7px 12px;margin:0;}
+  .status{margin-top:14px;font-size:13px;padding:10px 12px;border-radius:10px;display:none;white-space:pre-wrap;line-height:1.45;}
+  .status.show{display:block;}
+  .status.ok{background:#052e1a;color:#86efac;border:1px solid #166534;}
+  .status.err{background:#3b0a0a;color:#fca5a5;border:1px solid #7f1d1d;}
+  .status.info{background:#0b2942;color:#93c5fd;border:1px solid #1e40af;}
+  .hint{font-size:12px;color:#64748b;margin-top:8px;line-height:1.5;}
+  .lib{list-style:none;display:flex;flex-direction:column;gap:8px;}
+  .lib li{display:flex;align-items:center;justify-content:space-between;gap:10px;background:#020617;border:1px solid #1e293b;border-radius:10px;padding:10px 12px;}
+  .lib .meta{font-size:14px;}
+  .lib .meta small{display:block;color:#94a3b8;font-size:12px;}
+  .empty{color:#64748b;font-size:13px;text-align:center;padding:10px;}
+  .links{display:flex;gap:14px;font-size:14px;}
+  details summary{cursor:pointer;font-size:13px;color:#94a3b8;}
+</style>
+</head>
+<body>
+  <h1>🛠️ FRED · Administrar canciones <span>Sube cada archivo y etiqueta artista, canción y año</span></h1>
+  <div class="links"><a href="index.html">🎵 Ir al juego</a></div>
+
+  <!-- Configuración / token -->
+  <div class="card">
+    <h2>Conexión a GitHub</h2>
+    <details>
+      <summary>Repositorio (avanzado)</summary>
+      <div class="row" style="margin-top:8px">
+        <div><label>Owner</label><input id="owner" value="Soytorresllamas"></div>
+        <div><label>Repo</label><input id="repo" value="fred-adivina-la-cancion"></div>
+        <div style="max-width:90px"><label>Rama</label><input id="branch" value="main"></div>
+      </div>
+    </details>
+    <label>Token personal de GitHub (scope <b>repo</b>)</label>
+    <input id="token" type="password" placeholder="ghp_… o github_pat_…" autocomplete="off">
+    <p class="hint">Se guarda <b>solo en este navegador</b> (localStorage) y se envía directo a api.github.com. No se sube al repo. Crea uno en GitHub → Settings → Developer settings → Personal access tokens, con permiso <b>Contents: read/write</b> sobre este repo.</p>
+    <button class="ghost" id="verify">Verificar conexión</button>
+    <div class="status" id="cfgStatus"></div>
+  </div>
+
+  <!-- Alta de canción -->
+  <div class="card">
+    <h2>Agregar canción</h2>
+    <label>Archivo de audio (MP3, ~20–40s recomendado)</label>
+    <input id="file" type="file" accept="audio/*">
+    <div class="row">
+      <div><label>Canción</label><input id="song" placeholder="Dancing Queen"></div>
+      <div><label>Artista</label><input id="artist" placeholder="ABBA"></div>
+      <div style="max-width:110px"><label>Año</label><input id="year" type="number" min="1900" max="2100" placeholder="1976"></div>
+    </div>
+    <button id="save" disabled>Guardar en el repo</button>
+    <div class="status" id="saveStatus"></div>
+  </div>
+
+  <!-- Biblioteca -->
+  <div class="card">
+    <h2>Biblioteca actual</h2>
+    <button class="ghost" id="refresh" style="margin:0 0 12px">↻ Refrescar</button>
+    <ul class="lib" id="lib"></ul>
+    <div class="empty" id="libEmpty">Cargando…</div>
+  </div>
+
+<script>
+const $=s=>document.querySelector(s);
+const TOKEN_KEY='fred_gh_token', CFG_KEY='fred_gh_cfg';
+
+/* ---- config persistente ---- */
+function loadCfg(){
+  try{
+    const c=JSON.parse(localStorage.getItem(CFG_KEY)||'{}');
+    if(c.owner) $('#owner').value=c.owner;
+    if(c.repo) $('#repo').value=c.repo;
+    if(c.branch) $('#branch').value=c.branch;
+  }catch(e){}
+  $('#token').value=localStorage.getItem(TOKEN_KEY)||'';
+}
+function saveCfg(){
+  localStorage.setItem(CFG_KEY, JSON.stringify({owner:$('#owner').value.trim(), repo:$('#repo').value.trim(), branch:$('#branch').value.trim()}));
+  localStorage.setItem(TOKEN_KEY, $('#token').value.trim());
+}
+const cfg=()=>({owner:$('#owner').value.trim(), repo:$('#repo').value.trim(), branch:$('#branch').value.trim(), token:$('#token').value.trim()});
+
+/* ---- helpers ---- */
+function status(el,type,msg){ el.className='status show '+type; el.textContent=msg; }
+function hideStatus(el){ el.className='status'; }
+function b64encode(str){ return btoa(unescape(encodeURIComponent(str))); }
+function b64decode(b64){ return decodeURIComponent(escape(atob((b64||'').replace(/\s/g,'')))); }
+function slug(s){ return (s||'').toString().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'')||'x'; }
+function fileToB64(file){ return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result.split(',')[1]); r.onerror=rej; r.readAsDataURL(file); }); }
+
+async function gh(path, opts={}){
+  const {token}=cfg();
+  if(!token) throw new Error('Falta el token de GitHub.');
+  const res=await fetch('https://api.github.com'+path, {
+    ...opts,
+    headers:{ 'Authorization':'Bearer '+token, 'Accept':'application/vnd.github+json', 'X-GitHub-Api-Version':'2022-11-28', ...(opts.headers||{}) }
+  });
+  if(res.status===204) return null;
+  const data=await res.json().catch(()=>({}));
+  if(!res.ok){ throw new Error((data && data.message) ? data.message : ('Error HTTP '+res.status)); }
+  return data;
+}
+function base(){ const {owner,repo}=cfg(); return `/repos/${owner}/${repo}`; }
+
+/* ---- manifest ---- */
+async function getContent(path){           // -> {json/text, sha} o {sha:null} si no existe
+  const {branch}=cfg();
+  try{
+    const d=await gh(`${base()}/contents/${encodeURIComponent(path)}?ref=${encodeURIComponent(branch)}&t=${Date.now()}`);
+    return { text:b64decode(d.content), sha:d.sha };
+  }catch(e){ if(/not found/i.test(e.message)) return {text:null, sha:null}; throw e; }
+}
+async function putFile(path, b64content, message, sha){
+  const {branch}=cfg();
+  const body={ message, content:b64content, branch };
+  if(sha) body.sha=sha;
+  return gh(`${base()}/contents/${encodeURIComponent(path)}`, { method:'PUT', body:JSON.stringify(body) });
+}
+async function deleteFile(path, message, sha){
+  const {branch}=cfg();
+  return gh(`${base()}/contents/${encodeURIComponent(path)}`, { method:'DELETE', body:JSON.stringify({message, sha, branch}) });
+}
+async function getManifest(){
+  const c=await getContent('canciones.json');
+  let list=[]; try{ list = c.text ? JSON.parse(c.text) : []; }catch(e){ list=[]; }
+  if(!Array.isArray(list)) list=[];
+  return { list, sha:c.sha };
+}
+
+/* ---- verificar conexión ---- */
+$('#verify').addEventListener('click', async ()=>{
+  saveCfg(); hideStatus($('#cfgStatus'));
+  status($('#cfgStatus'),'info','Verificando…');
+  try{
+    const r=await gh(`${base()}`);
+    status($('#cfgStatus'),'ok',`✓ Conectado a ${r.full_name} (${r.private?'privado':'público'}). Permiso de escritura: ${r.permissions&&r.permissions.push?'sí':'NO — el token no puede escribir'}`);
+    loadLibrary();
+  }catch(e){ status($('#cfgStatus'),'err','✗ '+e.message); }
+});
+
+/* ---- guardar canción ---- */
+function refreshSaveEnabled(){ $('#save').disabled = !$('#file').files.length || !$('#song').value.trim(); }
+['#file','#song'].forEach(s=>$(s).addEventListener('input',refreshSaveEnabled));
+
+$('#save').addEventListener('click', async ()=>{
+  saveCfg();
+  const file=$('#file').files[0];
+  const song=$('#song').value.trim(), artist=$('#artist').value.trim(), year=$('#year').value.trim();
+  if(!file || !song){ status($('#saveStatus'),'err','Falta el archivo o el nombre de la canción.'); return; }
+  $('#save').disabled=true; status($('#saveStatus'),'info','Leyendo archivo…');
+  try{
+    const ext=(file.name.split('.').pop()||'mp3').toLowerCase();
+    const fname=`${slug(song)}-${slug(artist||'na')}.${ext}`;
+    const b64=await fileToB64(file);
+    // ¿ya existe ese archivo? (para reemplazar)
+    status($('#saveStatus'),'info','Subiendo audio… ('+Math.round(file.size/1024)+' KB)');
+    const existing=await getContent('canciones/'+fname);
+    await putFile('canciones/'+fname, b64, `Agrega audio: ${song}`, existing.sha);
+    // actualizar manifest
+    status($('#saveStatus'),'info','Actualizando biblioteca…');
+    const {list, sha}=await getManifest();
+    const entry={ file:fname, song, artist, year };
+    const idx=list.findIndex(x=>x.file===fname);
+    if(idx>=0) list[idx]=entry; else list.push(entry);
+    list.sort((a,b)=>(a.artist||'').localeCompare(b.artist||'')||(a.song||'').localeCompare(b.song||''));
+    await putFile('canciones.json', b64encode(JSON.stringify(list,null,2)+'\n'), `Actualiza manifest: ${song}`, sha);
+    status($('#saveStatus'),'ok',`✓ Guardado: ${song}${artist?' — '+artist:''}${year?' ('+year+')':''}\nLa página tarda ~1 min en publicarse en el juego.`);
+    $('#file').value=''; $('#song').value=''; $('#artist').value=''; $('#year').value='';
+    refreshSaveEnabled(); loadLibrary();
+  }catch(e){ status($('#saveStatus'),'err','✗ '+e.message); $('#save').disabled=false; }
+});
+
+/* ---- biblioteca ---- */
+async function loadLibrary(){
+  const lib=$('#lib'), empty=$('#libEmpty');
+  lib.innerHTML=''; empty.style.display='block'; empty.textContent='Cargando…';
+  try{
+    const {list}=await getManifest();
+    if(!list.length){ empty.textContent='Aún no hay canciones. Agrega la primera arriba.'; return; }
+    empty.style.display='none';
+    for(const it of list){
+      const li=document.createElement('li');
+      const meta=document.createElement('div'); meta.className='meta';
+      meta.innerHTML=`${it.song||it.file}<small>${(it.artist||'—')}${it.year?' · '+it.year:''}</small>`;
+      const del=document.createElement('button'); del.className='danger'; del.textContent='Eliminar';
+      del.addEventListener('click',()=>removeSong(it));
+      li.appendChild(meta); li.appendChild(del); lib.appendChild(li);
+    }
+  }catch(e){ empty.textContent='No se pudo cargar: '+e.message; }
+}
+async function removeSong(it){
+  if(!confirm(`¿Eliminar "${it.song||it.file}"?`)) return;
+  try{
+    const audio=await getContent('canciones/'+it.file);
+    if(audio.sha) await deleteFile('canciones/'+it.file, `Elimina audio: ${it.song||it.file}`, audio.sha);
+    const {list, sha}=await getManifest();
+    const next=list.filter(x=>x.file!==it.file);
+    await putFile('canciones.json', b64encode(JSON.stringify(next,null,2)+'\n'), `Actualiza manifest (elimina ${it.song||it.file})`, sha);
+    loadLibrary();
+  }catch(e){ alert('No se pudo eliminar: '+e.message); }
+}
+$('#refresh').addEventListener('click',loadLibrary);
+['#owner','#repo','#branch','#token'].forEach(s=>$(s).addEventListener('change',saveCfg));
+
+/* ---- init ---- */
+loadCfg(); refreshSaveEnabled();
+if(cfg().token) loadLibrary(); else $('#libEmpty').textContent='Pon tu token y verifica la conexión para ver la biblioteca.';
+</script>
+</body>
+</html>
