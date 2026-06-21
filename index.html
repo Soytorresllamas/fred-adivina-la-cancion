@@ -95,6 +95,26 @@
   .guess-card .g-btns button{border:none;border-radius:999px;padding:12px 26px;font-size:16px;font-weight:800;cursor:pointer;}
   #g-yes{background:#22c55e;color:#062a12;}
   #g-no{background:#ef4444;color:#2a0606;}
+
+  /* selector de fuente + Spotify */
+  .srctoggle{display:flex;gap:6px;background:#1e293b;border-radius:999px;padding:4px;}
+  .src{border:none;background:transparent;color:#cbd5e1;font-family:inherit;font-size:13px;font-weight:700;padding:7px 14px;border-radius:999px;cursor:pointer;}
+  .src.on{background:#1db954;color:#04210f;}
+  .spotcfg{display:flex;gap:8px;flex-wrap:wrap;align-items:center;justify-content:center;width:100%;max-width:560px;}
+  .spotcfg input{flex:1;min-width:200px;background:#020617;border:1px solid #334155;border-radius:10px;padding:10px 12px;color:#e2e8f0;font-size:14px;font-family:inherit;}
+  .spotcfg input:focus{outline:none;border-color:#1db954;}
+  .spotcfg button{border:none;border-radius:999px;padding:10px 18px;font-weight:800;cursor:pointer;background:#1db954;color:#04210f;}
+  .spotstatus{flex-basis:100%;text-align:center;font-size:12px;min-height:14px;}
+  .spotstatus.ok{color:#86efac;} .spotstatus.err{color:#fca5a5;} .spotstatus.info{color:#93c5fd;}
+  #spotwrap{display:flex;flex-direction:column;align-items:center;gap:10px;}
+  .spotplayer{position:relative;width:340px;border-radius:14px;overflow:hidden;border:1px solid #1f2937;}
+  #spotframe{min-height:80px;}
+  #spotmask{position:absolute;inset:0;background:repeating-linear-gradient(45deg,#0b1220,#0b1220 10px,#0e1626 10px,#0e1626 20px);display:flex;align-items:center;justify-content:center;color:#86efac;font-weight:800;font-size:15px;text-align:center;padding:0 12px;}
+  #spotjudge{display:none;flex-direction:column;align-items:center;gap:8px;}
+  #spotjudge .sj-q{font-size:14px;color:#fbbf24;font-weight:700;}
+  #spotjudge .sj-btns{display:flex;gap:10px;}
+  #spotjudge button{border:none;border-radius:999px;padding:10px 24px;font-size:15px;font-weight:800;cursor:pointer;}
+  #sj-yes{background:#22c55e;color:#062a12;} #sj-no{background:#ef4444;color:#2a0606;}
 </style>
 </head>
 <body>
@@ -109,6 +129,16 @@
       <button class="step" id="plus" aria-label="más jugadores">+</button>
     </div>
     <div class="songcount" id="songcount">🎵 <b>0</b> canciones</div>
+    <div class="srctoggle">
+      <button id="srcLocal" class="src on">📁 Biblioteca</button>
+      <button id="srcSpot" class="src">🎧 Spotify</button>
+    </div>
+  </div>
+
+  <div id="spotcfg" class="spotcfg" style="display:none">
+    <input id="spoturl" placeholder="Link o ID de una playlist pública de Spotify" autocomplete="off">
+    <button id="spotload">Cargar playlist</button>
+    <div class="spotstatus" id="spotstatus"></div>
   </div>
 
   <div class="scoreboard" id="scoreboard"></div>
@@ -123,6 +153,17 @@
     <div class="pad" id="pad"></div>
   </div>
 
+  <div id="spotwrap" style="display:none">
+    <div class="spotplayer">
+      <div id="spotframe"></div>
+      <div id="spotmask"><span>🎧 Spotify · ¿qué canción es?</span></div>
+    </div>
+    <div id="spotjudge">
+      <div class="sj-q">¿Acertó? (mira el reproductor 👆)</div>
+      <div class="sj-btns"><button id="sj-yes">Sí ✅</button><button id="sj-no">No ❌</button></div>
+    </div>
+  </div>
+
   <div class="controls">
     <button class="ctl know" id="know" disabled>¡LA SÉ! 🎤</button>
     <button class="ctl" id="start" disabled>JUGAR</button>
@@ -131,7 +172,7 @@
     <a class="ctl ghost" id="adminlink" href="admin.html">🛠️ Administrar</a>
   </div>
 
-  <p class="hint">El tablero ilumina una secuencia y suena la canción por pedazos (desde el inicio, cada vez más larga). En tu turno repite la secuencia para desbloquear más canción, o toca <b>¡LA SÉ!</b> si ya sabes cuál es. Aciertas → punto y nueva canción. Te equivocas al adivinar → quedas fuera de esa canción. Las canciones se administran en <a href="admin.html" style="color:#86efac">🛠️ Administrar</a>.</p>
+  <p class="hint">El tablero ilumina una secuencia y suena la canción por pedazos (desde el inicio, cada vez más larga). En tu turno repite la secuencia para desbloquear más canción, o toca <b>¡LA SÉ!</b> si ya sabes cuál es. Aciertas → punto y nueva canción. Te equivocas al adivinar → quedas fuera de esa canción. Dos fuentes: <b>Biblioteca</b> (sube y etiqueta en <a href="admin.html" style="color:#86efac">🛠️ Administrar</a>) o <b>Spotify</b> (pega una playlist pública; el reproductor va enmascarado y se destapa al adivinar). En Spotify sin Premium suenan previews de 30s.</p>
 
   <input type="file" id="folder" webkitdirectory directory multiple accept="audio/*" hidden>
 
@@ -185,6 +226,10 @@ let eliminated=new Set();
 let nameInputs=[], scoreSpans=[], cards=[];
 let state='idle';                      // idle|demo|input|guessing|between|gameover
 let runId=0;
+
+/* fuente de audio: 'local' (biblioteca/repo) o 'spotify' */
+let mode='local';
+let spotApi=null, spotController=null, spotReady=false, spotPos=0, spotDur=0, spotPlaylistId='';
 
 const wait=ms=>new Promise(r=>setTimeout(r,ms));
 function later(ms,fn){ const my=runId; setTimeout(()=>{ if(my===runId) fn(); }, ms); }
@@ -310,8 +355,8 @@ function setPlayers(n){
 }
 function renderSongs(){
   $('#songcount').innerHTML=`🎵 <b>${songs.length}</b> ${songs.length===1?'canción':'canciones'}`;
-  $('#start').disabled = songs.length===0 || state!=='idle';
-  if(state==='idle') elMsg.textContent = songs.length? 'Presiona JUGAR para empezar' : 'Carga canciones y presiona JUGAR';
+  $('#start').disabled = !canStart() || state!=='idle';
+  if(state==='idle') elMsg.textContent = startReadyMsg();
 }
 
 /* ================= carga de canciones ================= */
@@ -362,10 +407,68 @@ async function loadManifest(){
   }catch(e){ /* sin manifest aún — usa el botón Cargar canciones */ }
 }
 
+/* ================= Spotify (sin login) ================= */
+window.onSpotifyIframeApiReady = (IFrameAPI)=>{ spotApi=IFrameAPI; if(spotPlaylistId && !spotController) createController(spotPlaylistId); };
+function spotStatus(type,msg){ const el=$('#spotstatus'); if(el){ el.className='spotstatus '+type; el.textContent=msg; } }
+function parsePlaylistId(s){
+  s=(s||'').trim();
+  const m=s.match(/playlist[/:]([A-Za-z0-9]+)/);
+  if(m) return m[1];
+  if(/^[A-Za-z0-9]{16,}$/.test(s)) return s;
+  return '';
+}
+function loadPlaylist(){
+  const id=parsePlaylistId($('#spoturl').value);
+  if(!id){ spotStatus('err','Pega un link o ID de playlist válido.'); return; }
+  spotPlaylistId=id; localStorage.setItem('fred_spot_playlist', id);
+  spotReady=false; renderSongs();
+  spotStatus('info', spotApi ? 'Cargando playlist…' : 'Esperando el reproductor de Spotify…');
+  if(spotApi) createController(id);
+}
+function createController(id){
+  const host=$('#spotframe'); if(!host) return; host.innerHTML='';
+  spotApi.createController(host, { uri:'spotify:playlist:'+id, width:'100%', height:'80' }, (ctrl)=>{
+    spotController=ctrl;
+    ctrl.addListener('ready', ()=>{ spotReady=true; spotStatus('ok','✓ Playlist lista. Presiona JUGAR.'); renderSongs(); if(state==='idle') setScreen('— LISTO —', startReadyMsg(),''); });
+    ctrl.addListener('playback_update', e=>{ if(e&&e.data){ spotPos=e.data.position||0; if(e.data.duration) spotDur=e.data.duration; } });
+  });
+}
+function spotPlayFrom0(){ try{ spotController.seek(0); spotController.resume(); }catch(e){} }
+function spotPause(){ try{ spotController.pause(); }catch(e){} }
+/* avanza a la siguiente pista de la playlist (truco sin token: saltar al final) */
+function spotNextTrack(cb){
+  const my=runId;
+  try{ spotController.seek(Math.max(1,(spotDur/1000)-0.4)); spotController.resume(); }catch(e){}
+  setTimeout(()=>{ if(my!==runId) return; try{ spotController.seek(0); spotController.pause(); }catch(e){} cb&&cb(); }, 1700);
+}
+function spotMask(on){ const m=$('#spotmask'); if(m) m.style.display = on?'flex':'none'; }
+function spotShowJudge(on,who){ const j=$('#spotjudge'); if(!j) return; j.style.display=on?'flex':'none'; if(on&&who) j.querySelector('.sj-q').textContent=`¿Acertó ${who}? (mira el reproductor 👆)`; }
+
+function canStart(){ return mode==='spotify' ? spotReady : songs.length>0; }
+function startReadyMsg(){
+  if(mode==='spotify') return spotReady ? 'Presiona JUGAR para empezar' : 'Carga una playlist de Spotify';
+  return songs.length ? 'Presiona JUGAR para empezar' : 'Carga canciones y presiona JUGAR';
+}
+function setMode(m){
+  if(state!=='idle') return;
+  mode=m;
+  $('#srcLocal').classList.toggle('on', m==='local');
+  $('#srcSpot').classList.toggle('on', m==='spotify');
+  $('#spotcfg').style.display = m==='spotify'?'flex':'none';
+  $('#spotwrap').style.display = m==='spotify'?'flex':'none';
+  $('#load').style.display = m==='local'?'inline-flex':'none';
+  $('#songcount').style.display = m==='local'?'inline-block':'none';
+  if(m==='spotify' && spotPlaylistId && !spotController && spotApi) createController(spotPlaylistId);
+  spotMask(true); spotShowJudge(false);
+  renderSongs();
+  setScreen('— LISTO —', startReadyMsg(), '');
+}
+
 /* ================= flujo del juego ================= */
 function startGame(){
-  if(!songs.length) return;
+  if(!canStart()) return;
   ensureCtx(); if(audioCtx.state==='suspended') audioCtx.resume();
+  if(mode==='spotify'){ try{ spotController.resume(); }catch(e){} }   // desbloquea autoplay con el gesto
   runId++;
   scores=Array(MAXP).fill(0);
   playedIdx=new Set();
@@ -374,6 +477,11 @@ function startGame(){
   nextSong(true);
 }
 function nextSong(first){
+  if(mode==='spotify'){
+    if(first) startSong();
+    else spotNextTrack(()=>startSong());     // FRED dispara el avance; orden de la playlist
+    return;
+  }
   if(!first) playedIdx.add(currentSongIdx);
   const remaining=songs.map((_,i)=>i).filter(i=>!playedIdx.has(i));
   if(remaining.length===0){ return gameOver(); }
@@ -381,8 +489,13 @@ function nextSong(first){
   startSong();
 }
 function startSong(){
-  const s=songs[currentSongIdx];
-  maxSeg=Math.max(1, Math.floor(s.dur/SEGLEN));
+  if(mode==='spotify'){
+    maxSeg = spotDur ? Math.max(1, Math.floor((spotDur/1000)/SEGLEN)) : 15;
+    spotMask(true); spotShowJudge(false);
+  } else {
+    const s=songs[currentSongIdx];
+    maxSeg=Math.max(1, Math.floor(s.dur/SEGLEN));
+  }
   eliminated=new Set();
   sequence=[]; inputIdx=0;
   sequence.push(Math.floor(Math.random()*NBTN)); revealed=1;
@@ -392,12 +505,16 @@ async function demoSequence(){
   const my=runId; state='demo'; setControls();
   setScreen(`Turno · ${names[current]}`,'Escucha y observa… 🎧',`Pista ${revealed}/${maxSeg} · 🎵`);
   await wait(550); if(my!==runId) return;
+  if(mode==='spotify') spotPlayFrom0();        // reproduce del 0; crece con la secuencia
   for(let i=0;i<sequence.length;i++){
-    lit(sequence[i],true); playSegment(i);
-    await wait(SEGLEN*1000); if(my!==runId){ stopSegment(); lit(sequence[i],false); return; }
-    lit(sequence[i],false); stopSegment();
-    await wait(SHOW_GAP); if(my!==runId) return;
+    lit(sequence[i],true);
+    if(mode==='local') playSegment(i);
+    await wait(SEGLEN*1000); if(my!==runId){ if(mode==='spotify') spotPause(); else stopSegment(); lit(sequence[i],false); return; }
+    lit(sequence[i],false);
+    if(mode==='local') stopSegment();
+    await wait(SHOW_GAP); if(my!==runId){ if(mode==='spotify') spotPause(); return; }
   }
+  if(mode==='spotify') spotPause();
   state='input'; inputIdx=0; setControls();
   setScreen(`Turno · ${names[current]}`,'Repite la secuencia 👆 o toca ¡LA SÉ!',`Pista ${revealed}/${maxSeg} · 🎵`);
 }
@@ -448,15 +565,34 @@ function nextPlayer(){
 /* --- adivinar --- */
 function guess(){
   if(state!=='input') return;
-  stopSegment();
   state='guessing'; setControls();
+  if(mode==='spotify'){
+    spotPause(); spotMask(false); spotShowJudge(true, names[current]);   // destapa el widget = revelar
+    return;
+  }
+  stopSegment();
   $('#g-who').textContent=`${names[current]} dijo saberla 🎤`;
   $('#g-song').textContent=songs[currentSongIdx].title;
   $('#guess').classList.add('go');
 }
 function resolveGuess(yes){
+  const who=names[current];
+  if(mode==='spotify'){
+    spotShowJudge(false); spotMask(true);
+    if(yes){
+      scores[current]++; state='between'; renderScores();
+      setScreen('🎉 ¡CORRECTO!',`¡Punto para ${who}!`,`${scores[current]} pts`);
+      party(who);
+      later(3600,()=>nextSong(false));
+    }else{
+      eliminated.add(current); explode(); state='demo';
+      setScreen(`${who} 💥`,'¡No era! Queda fuera de esta canción',`Pista ${revealed}/${maxSeg} · 🎵`);
+      later(1700,()=>advance(false));
+    }
+    return;
+  }
   $('#guess').classList.remove('go');
-  const who=names[current], title=songs[currentSongIdx].title;
+  const title=songs[currentSongIdx].title;
   if(yes){
     scores[current]++;
     state='between'; renderScores();
@@ -473,7 +609,8 @@ function resolveGuess(yes){
 }
 function endSong(){
   state='between';
-  setScreen('🎵 Nadie la sacó',`Era: <b>${songs[currentSongIdx].title}</b>`,'');
+  if(mode==='spotify'){ spotMask(true); setScreen('🎵 Nadie la sacó','Pasamos a la siguiente…',''); }
+  else setScreen('🎵 Nadie la sacó',`Era: <b>${songs[currentSongIdx].title}</b>`,'');
   later(3400,()=>nextSong(false));
 }
 function gameOver(){
@@ -486,6 +623,7 @@ function gameOver(){
 
 function resetGame(){
   runId++; stopSegment();
+  spotPause(); spotMask(true); spotShowJudge(false);
   try{ boo.pause(); boo.currentTime=0; cheer.pause(); cheer.currentTime=0; }catch(e){}
   $('#boom').classList.remove('go'); $('#party').classList.remove('go'); $('#guess').classList.remove('go');
   $('#party').querySelectorAll('.confetti').forEach(x=>x.remove());
@@ -495,7 +633,7 @@ function resetGame(){
   pad.classList.remove('playable'); btns().forEach(b=>b.classList.remove('lit'));
   $('#know').disabled=true;
   renderSongs();
-  setScreen('— LISTO —', songs.length?'Presiona JUGAR':'Carga canciones y presiona JUGAR','');
+  setScreen('— LISTO —', startReadyMsg(),'');
 }
 
 /* ================= eventos ================= */
@@ -514,10 +652,20 @@ $('#g-yes').addEventListener('click',()=>resolveGuess(true));
 $('#g-no').addEventListener('click',()=>resolveGuess(false));
 $('#load').addEventListener('click',()=>$('#folder').click());
 $('#folder').addEventListener('change',e=>loadFiles(e.target.files));
+$('#srcLocal').addEventListener('click',()=>setMode('local'));
+$('#srcSpot').addEventListener('click',()=>setMode('spotify'));
+$('#spotload').addEventListener('click',loadPlaylist);
+$('#sj-yes').addEventListener('click',()=>resolveGuess(true));
+$('#sj-no').addEventListener('click',()=>resolveGuess(false));
+
+const savedPl=localStorage.getItem('fred_spot_playlist')||'';
+if(savedPl){ $('#spoturl').value=savedPl; spotPlaylistId=savedPl; }
 
 setPlayers(NPLAYERS);
+setMode('local');
 resetGame();
 loadManifest();
 </script>
+<script src="https://open.spotify.com/embed/iframe-api/v1" async></script>
 </body>
 </html>
